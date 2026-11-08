@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Forgotten Faves</title>
+<style>
+  :root {
+    --bg: #15121f;
+    --surface: #221d33;
+    --line: #3a3354;
+    --text: #f3f0fa;
+    --muted: #a8a0c4;
+    --label: #ffd84a;
+    --on-label: #1d1700;
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  *, *::before, *::after { box-sizing: inherit; }
+  html { background: var(--bg); }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 18px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 960px; margin: 0 auto; padding: 48px 24px 64px; }
+  h1 {
+    margin: 0 0 8px;
+    font: italic 800 clamp(44px, 9vw, 84px)/1 "Iowan Old Style", Palatino, Georgia, serif;
+    letter-spacing: -0.02em;
+  }
+  .sub { margin: 0 0 40px; color: var(--muted); max-width: 52ch; }
+  [hidden] { display: none !important; }
+
+  button, .btn {
+    font: inherit; font-weight: 700; cursor: pointer;
+    border: 0; border-radius: 999px; padding: 14px 28px;
+    background: var(--label); color: var(--on-label);
+    text-decoration: none; display: inline-block;
+  }
+  button:focus-visible, a:focus-visible, .seg label:focus-within {
+    outline: 3px solid #fff; outline-offset: 3px;
+  }
+  button:disabled { opacity: .6; cursor: progress; }
+  .ghost { background: transparent; color: var(--muted); border: 1px solid var(--line); padding: 8px 16px; font-weight: 500; font-size: 15px; }
+
+  .setup { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 20px 24px; margin-top: 32px; font-size: 15px; color: var(--muted); }
+  .setup code { display: block; margin-top: 8px; padding: 10px 12px; background: var(--bg); border-radius: 8px; color: var(--text); word-break: break-all; user-select: all; }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; margin-bottom: 40px; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
+  .seg input { position: absolute; opacity: 0; pointer-events: none; }
+  .seg label { padding: 12px 20px; cursor: pointer; color: var(--muted); font-weight: 600; min-width: 52px; text-align: center; }
+  .seg input:checked + label { background: var(--text); color: var(--bg); }
+
+  .meta { color: var(--muted); font-size: 15px; margin: 0 0 20px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 28px 24px; padding: 0; margin: 0; list-style: none; }
+  .card { display: block; color: inherit; text-decoration: none; }
+  .art {
+    aspect-ratio: 1; width: 100%; border-radius: 6px; background: var(--surface);
+    object-fit: cover; display: grid; place-items: center;
+    font: italic 800 64px/1 "Iowan Old Style", Palatino, Georgia, serif; color: var(--on-label);
+  }
+  .card h2 { margin: 12px 0 2px; font: 700 20px/1.25 "Iowan Old Style", Palatino, Georgia, serif; }
+  .card:hover h2 { text-decoration: underline; text-decoration-color: var(--label); text-underline-offset: 4px; }
+  .card p { margin: 0; color: var(--muted); font-size: 14px; }
+  .status { color: var(--muted); }
+  .error { color: #ff9b8a; }
+  footer { margin-top: 56px; display: flex; gap: 16px; align-items: center; }
+  @media (prefers-reduced-motion: no-preference) { button { transition: transform .1s; } button:active { transform: scale(.97); } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Forgotten Faves</h1>
+  <p class="sub">Случайные исполнители из тех, на кого вы подписаны в Spotify. Напомнит о музыке, про которую вы забыли.</p>
+
+  <section id="login" hidden>
+    <button id="loginBtn" type="button">Войти через Spotify</button>
+    <div class="setup">
+      Перед первым входом добавьте этот адрес в Redirect URIs вашего приложения на developer.spotify.com (Edit → Add → Save):
+      <code id="redirectShow"></code>
+    </div>
+  </section>
+
+  <section id="app" hidden>
+    <div class="controls">
+      <div class="seg" role="radiogroup" aria-label="Сколько артистов показать">
+        <input type="radio" name="n" id="n1" value="1"><label for="n1">1</label>
+        <input type="radio" name="n" id="n3" value="3"><label for="n3">3</label>
+        <input type="radio" name="n" id="n6" value="6" checked><label for="n6">6</label>
+        <input type="radio" name="n" id="n12" value="12"><label for="n12">12</label>
+      </div>
+      <button id="shuffleBtn" type="button">Перемешать</button>
+    </div>
+    <p class="meta" id="meta"></p>
+    <ul class="grid" id="grid"></ul>
+    <footer><button class="ghost" id="logoutBtn" type="button">Выйти</button></footer>
+  </section>
+
+  <p class="status" id="status" role="status"></p>
+</main>
+
+<script>
+  // Client ID публичный, его можно хранить в коде. Client Secret здесь не нужен.
+  const CLIENT_ID = "11c63cb25b16475d846c7dc951aeeb7a";
+  const REDIRECT_URI = location.origin + location.pathname.replace(/index\.html$/, "");
+  const SCOPE = "user-follow-read";
+
+  const $ = (id) => document.getElementById(id);
+  const store = {
+    get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
+    set: (k, v) => { try { localStorage.setItem(k, v); } catch {} },
+    del: (k) => { try { localStorage.removeItem(k); } catch {} },
+  };
+
+  let artists = null;
+
+  function setStatus(text, isError) {
+    const el = $("status");
+    el.textContent = text || "";
+    el.className = "status" + (isError ? " error" : "");
+  }
+
+  // ---------- PKCE ----------
+  function randomString(bytes) {
+    const a = new Uint8Array(bytes);
+    crypto.getRandomValues(a);
+    return Array.from(a, (b) => b.toString(16).padStart(2, "0")).join("");
+  }
+  async function sha256Challenge(verifier) {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+    return btoa(String.fromCharCode(...new Uint8Array(digest)))
+      .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+
+  async function startLogin() {
+    const verifier = randomString(32);
+    const state = randomString(8);
+    store.set("ff_verifier", verifier);
+    store.set("ff_state", state);
+    const params = new URLSearchParams({
+      client_id: CLIENT_ID,
+      response_type: "code",
+      redirect_uri: REDIRECT_URI,
+      scope: SCOPE,
+      code_challenge_method: "S256",
+      code_challenge: await sha256Challenge(verifier),
+      state,
+    });
+    location.href = "https://accounts.spotify.com/authorize?" + params;
+  }
+
+  async function tokenRequest(body) {
+    const res = await fetch("https://accounts.spotify.com/api/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ client_id: CLIENT_ID, ...body }),
+    });
+    if (!res.ok) throw new Error("token " + res.status);
+    const data = await res.json();
+    store.set("ff_token", data.access_token);
+    store.set("ff_exp", String(Date.now() + data.expires_in * 1000));
+    if (data.refresh_token) store.set("ff_refresh", data.refresh_token);
+  }
+
+  async function handleCallback() {
+    const q = new URLSearchParams(location.search);
+    if (!q.has("code") && !q.has("error")) return;
+    history.replaceState(null, "", REDIRECT_URI);
+    if (q.get("error")) throw new Error("Доступ не был предоставлен.");
+    if (q.get("state") !== store.get("ff_state")) throw new Error("Не совпал код безопасности. Попробуйте войти ещё раз.");
+    await tokenRequest({
+      grant_type: "authorization_code",
+      code: q.get("code"),
+      redirect_uri: REDIRECT_URI,
+      code_verifier: store.get("ff_verifier"),
+    });
+  }
+
+  async function getToken() {
+    const token = store.get("ff_token");
+    if (token && Number(store.get("ff_exp")) > Date.now() + 60000) return token;
+    const refresh = store.get("ff_refresh");
+    if (refresh) {
+      try {
+        await tokenRequest({ grant_type: "refresh_token", refresh_token: refresh });
+        return store.get("ff_token");
+      } catch { /* нужно войти заново */ }
+    }
+    return null;
+  }
+
+  function logout() {
+    ["ff_token", "ff_exp", "ff_refresh", "ff_verifier", "ff_state"].forEach(store.del);
+    artists = null;
+    show("login");
+    setStatus("");
+  }
+
+  // ---------- Spotify data ----------
+  async function loadArtists(token) {
+    const all = [];
+    let after = "";
+    for (;;) {
+      const url = "https://api.spotify.com/v1/me/following?type=artist&limit=50" + (after ? "&after=" + after : "");
+      const res = await fetch(url, { headers: { Authorization: "Bearer " + token } });
+      if (res.status === 401) { logout(); throw new Error("Сессия истекла. Войдите снова."); }
+      if (res.status === 429) throw new Error("Spotify просит подождать. Повторите через минуту.");
+      if (!res.ok) throw new Error("Spotify ответил ошибкой " + res.status + ".");
+      const page = (await res.json()).artists;
+      all.push(...page.items);
+      after = page.cursors && page.cursors.after;
+      if (!after) break;
+      setStatus("Загружаю подписки: " + all.length + "…");
+    }
+    return all;
+  }
+
+  // ---------- UI ----------
+  function show(which) {
+    $("login").hidden = which !== "login";
+    $("app").hidden = which !== "app";
+  }
+
+  function pick(list, n) {
+    const a = list.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a.slice(0, n);
+  }
+
+  function renderCard(artist) {
+    const li = document.createElement("li");
+    const a = document.createElement("a");
+    a.className = "card";
+    a.href = artist.external_urls.spotify;
+    a.target = "_blank";
+    a.rel = "noopener";
+
+    const imgs = artist.images || [];
+    let art;
+    if (imgs.length) {
+      art = document.createElement("img");
+      art.className = "art";
+      art.alt = "";
+      art.loading = "lazy";
+      art.src = (imgs[1] || imgs[0]).url;
+    } else {
+      art = document.createElement("div");
+      art.className = "art";
+      art.textContent = artist.name.trim().charAt(0).toUpperCase();
+    }
+    const h = document.createElement("h2");
+    h.textContent = artist.name;
+    a.append(art, h);
+
+    const genres = (artist.genres || []).slice(0, 2).join(", ");
+    if (genres) {
+      const p = document.createElement("p");
+      p.textContent = genres;
+      a.append(p);
+    }
+    li.append(a);
+    return li;
+  }
+
+  function shuffle() {
+    if (!artists) return;
+    const n = Number(document.querySelector('input[name="n"]:checked').value);
+    const picks = pick(artists, Math.min(n, artists.length));
+    $("meta").textContent = "Подписок: " + artists.length + ". Случайные " + picks.length + ":";
+    $("grid").replaceChildren(...picks.map(renderCard));
+  }
+
+  async function start() {
+    $("redirectShow").textContent = REDIRECT_URI;
+    try {
+      await handleCallback();
+      const token = await getToken();
+      if (!token) { show("login"); return; }
+      show("app");
+      setStatus("Загружаю подписки…");
+      $("shuffleBtn").disabled = true;
+      artists = await loadArtists(token);
+      setStatus("");
+      $("shuffleBtn").disabled = false;
+      if (!artists.length) { $("meta").textContent = "Вы пока ни на кого не подписаны."; return; }
+      shuffle();
+    } catch (e) {
+      setStatus(e.message || "Что-то пошло не так.", true);
+      $("shuffleBtn").disabled = false;
+      if (!(await getToken())) show("login");
+    }
+  }
+
+  $("loginBtn").addEventListener("click", startLogin);
+  $("shuffleBtn").addEventListener("click", shuffle);
+  $("logoutBtn").addEventListener("click", logout);
+  document.querySelectorAll('input[name="n"]').forEach((r) => r.addEventListener("change", shuffle));
+  start();
+</script>
+</body>
+</html>
